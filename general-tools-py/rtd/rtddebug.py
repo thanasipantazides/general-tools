@@ -47,14 +47,14 @@ def str_red(txt: str):
     return "\033[91m" + txt + "\033[0m"
 
 
-def printstrip(channels, errors, values):
+def printstrip(id, channels, errors, values):
     now = datetime.now()
     nowstr = now.strftime("%d %b %Y %H:%M:%S")
     pad = "  "
     twidth = 6
     fmt = "{:" + str(twidth) + ".2f}"
 
-    strout = nowstr + pad
+    strout = nowstr + pad + "{0:2}".format(id) + ":" + pad
     for e, v in zip(errors, values):
         if e == 1:
             strout += str_green(fmt.format(v)) + pad
@@ -90,7 +90,7 @@ if __name__ == "__main__":
                 # print("chip", data[8])
                 # print("\terrors:", sd[1])
                 # print("\tvalues:", sd[2])
-                printstrip(sd[0], sd[1], sd[2])
+                printstrip(data[8], sd[0], sd[1], sd[2])
         except KeyboardInterrupt:
             break
 
