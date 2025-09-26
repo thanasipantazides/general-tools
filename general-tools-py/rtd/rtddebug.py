@@ -2,7 +2,6 @@ import socket, os, sys, struct, time
 from datetime import datetime
 
 import numpy as np
-from matplotlib import pyplot as plt
 
 default_local_ip = "192.168.1.180"
 default_local_port = 9999
@@ -49,17 +48,19 @@ def str_red(txt: str):
 
 
 def printstrip(channels, errors, values):
+    now = datetime.now()
+    nowstr = now.strftime("%d %b %Y %H:%M:%S")
     pad = "  "
     twidth = 6
     fmt = "{:" + str(twidth) + ".2f}"
 
-    strout = ""
+    strout = nowstr + pad
     for e, v in zip(errors, values):
         if e == 1:
             strout += str_green(fmt.format(v)) + pad
         else:
             strout += str_red(((twidth - 1) * " ") + "x") + pad
-        strout += "\n"
+    strout += "\n"
 
     print(strout, end=None)
 
