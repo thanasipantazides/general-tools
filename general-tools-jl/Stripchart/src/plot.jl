@@ -114,7 +114,7 @@ function stripchart(socket::Sockets.UDPSocket)
     
     do_vdiff = GLMakie.Button(grid[3,8], tellwidth=false, label="Differential voltage")
     do_rescale = GLMakie.Button(grid[3,1], tellwidth=false, label="Autoscale")
-    do_legend = GLMakie.Toggle(grid[3,2], tellwidth=false, active=true)
+    do_legend = GLMakie.Toggle(grid[3,2], tellwidth=false, active=true, halign=:right)
     toggle_lab = GLMakie.Label(grid[3,3], "Show legends", tellwidth=false, justification=:left, halign=:left)
     
     rowsize!(grid, 2, Relative(0/3))

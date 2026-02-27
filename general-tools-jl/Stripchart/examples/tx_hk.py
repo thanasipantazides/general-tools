@@ -55,10 +55,10 @@ def get_frames(argv):
 
 if __name__ == '__main__':
     if not len(sys.argv) >= 2:
-        print("use like this:\n\t> python tx_hk.py path/to/raw/file.log [--packetize]")
+        print("use like this:\n\t> python tx_hk.py path/to/raw/file.log [--packetize --loop]")
         exit(-1)
     
-    frames_data = get_frames(sys.argv)
+    frames_data = get_frames(sys.argv[2:])
     
     # with open(fname, 'rb') as f:
     #     d = f.read()
@@ -69,10 +69,11 @@ if __name__ == '__main__':
     
     sock.bind(lept)
     
-    k = 0
+    k = 1
+    first = True
     pwidth = 12
     while True:
-        
+        k += 1
         for key in frames_data.keys():
             if key == "rtd":
                 pair_k = (frames_data[key]["k"] + 1) % len(frames_data[key]["frames"])
@@ -80,16 +81,19 @@ if __name__ == '__main__':
                 to_send = [frames_data[key]["frames"][k] for k in (frames_data[key]["k"], pair_k)]
                 frames_data[key]["k"] = next_k
             else:
-                k = frames_data[key]["k"]
-                to_send = [frames_data[key]["frames"][k]]
+                to_send = [frames_data[key]["frames"][frames_data[key]["k"]]]
                 next_k = (frames_data[key]["k"] + 1) % len(frames_data[key]["frames"])
                 frames_data[key]["k"] = next_k
-        
+            
+            if not first and next_k == 0 and "--loop" not in sys.argv:
+                sys.exit(1)
+                
             if '--packetize' in sys.argv:
                 [sock.sendto(packetize(frame, type=frames_data[key]["type"]), rept) for frame in to_send]
             else:
                 [sock.sendto(frame, rept) for frame in to_send]
-            
+        
+        first = False
         print(' ' + worm(k % pwidth, pwidth) + ' ', end='\r')
         time.sleep(0.1)
         
