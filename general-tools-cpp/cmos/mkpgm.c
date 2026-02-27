@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <dirent.h>
 #include <string.h>
+#include <math.h>
 
 #define PSEP "/"
 #ifdef _WIN32
@@ -48,7 +49,7 @@ int write_pgm(const char* fname, unsigned short img[]) {
     }
     
     unsigned long current_length = 0;
-    const char header[53] = "P2\n# CMOS PGM writer for quicklook\n2048 1920\n65535";
+    const char header[53] = "P2\n# CMOS PGM writer for quicklook\n2048 1920\n65535\n";
     
     fputs(header, fh);
     // for (unsigned short i = 0; i < PX; ++i) {
@@ -73,17 +74,50 @@ int write_pgm(const char* fname, unsigned short img[]) {
     // current_length += snprintf(outbuff + current_length, BUFFER_SIZE - current_length, "%6u", this);
 }
 
-unsigned short read_buf[PX*PY];
-unsigned short img_out[PX*PY] = {0};
-unsigned long img_count = 0;
-unsigned long wrong_size_count = 0;
-unsigned long total_files = 0;
-
 void move_average(unsigned short* img_old, unsigned short* img_new, unsigned long count) {    
     for (unsigned long ind = 0; ind < PX*PY; ++ind) {
         img_old[ind] = (img_new[ind] + count*img_old[ind]) / (count + 1);
     }
 }
+
+void subtract_darkness(unsigned short* img, unsigned short* dark) {
+    for (unsigned long ind = 0; ind < PX*PY; ++ind) {
+        img[ind] = img[ind] - dark[ind];
+    }
+}
+
+void linscale(unsigned short* img, unsigned short max) {
+    // find the max value in the image
+    unsigned short img_max = 0;
+    unsigned short img_min = 0xffff;
+    for (unsigned long ind = 1; ind < PX*PY; ++ind) { // skip first, it is HK
+        if (img[ind] > img_max) {
+            img_max = img[ind];
+        }
+        if (img[ind] < img_min) {
+            img_min = img[ind];
+        }
+    }
+    
+    if (img_max == img_min) {
+        // avoid div by zero if there is no dynamic range.
+        return;
+    }
+    
+    // scale all values up to the max as passed in arg:`
+    float fscale = max/(img_max - img_min);
+    printf("> scaling: %f\n\n", fscale);
+    unsigned short scale = (unsigned short)floor(max/(img_max - img_min));
+    for (unsigned long ind = 1; ind < PX*PY; ++ind) {
+        img[ind] = (img[ind] - img_min)*scale;
+    }
+}
+
+unsigned short read_buf[PX*PY];
+unsigned short img_out[PX*PY] = {0};
+unsigned long img_count = 0;
+unsigned long wrong_size_count = 0;
+unsigned long total_files = 0;
 
 int main (int argc, char** argv) {
     if (argc < 4) {
@@ -131,9 +165,10 @@ int main (int argc, char** argv) {
         closedir(dir);
         
         // write_ql(save_path, img_out);
+        // linscale(img_out, 65535);
         write_pgm(save_path, img_out);
         printf("> saved average output to %s\n", save_path);
-        printf("> found %u files with wrong length out of %u\n", wrong_size_count, img_count);
+        printf("> found %lu files with wrong length out of %lu\n", wrong_size_count, img_count);
         
     } else {
         // return -1;
