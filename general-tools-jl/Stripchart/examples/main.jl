@@ -1,7 +1,15 @@
 using Stripchart
 using Sockets
 
+function run(logfolder::AbstractString)
+    power_file = abspath(joinpath(logfolder, "housekeeping_pow.log"))
+    rtd_file = abspath(joinpath(logfolder, "housekeeping_rtd.log"))
+    stripchart_file(power_file, rtd_file)
+end
 
+function run(power_file::AbstractString, rtd_file::AbstractString)
+    stripchart_file(power_file, rtd_file)
+end
 
 function run(ip::IPv4, port::Int; group::String="")
     # udp_listen(ip, port; group)
