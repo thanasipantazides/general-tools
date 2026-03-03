@@ -243,14 +243,14 @@ function stripchart_file(power_file::AbstractString, rtd_file::AbstractString)
     display(fig)
     
     # create all axes, buffers.
-    cold_ax =       GLMakie.Axis(grid[1,1], title="Cold focal plane\ntemperatures [ºC]")
+    cold_ax =       GLMakie.Axis(grid[1,1], title="Cold focal plane\ntemperatures [ºC]", xlabel="[ºC]")
     cold_flag_ax =  GLMakie.Axis(grid[1,2], xticks=[0,5,9])
-    warm_ax =       GLMakie.Axis(grid[1,3], title="Warm detector-end\ntemperatures [ºC]")
+    warm_ax =       GLMakie.Axis(grid[1,3], title="Warm detector-end\ntemperatures [ºC]", xlabel="[ºC]")
     warm_flag_ax =  GLMakie.Axis(grid[1,4], xticks=[0,5,9])
-    opt_ax =        GLMakie.Axis(grid[1,5], title="Optics-end\ntemperatures [ºC]")
+    opt_ax =        GLMakie.Axis(grid[1,5], title="Optics-end\ntemperatures [ºC]", xlabel="[ºC]")
     opt_flag_ax =   GLMakie.Axis(grid[1,6], xticks=[0,5,9])
-    current_ax =    GLMakie.Axis(grid[1,7], title="Current [A]")
-    voltage_ax =    GLMakie.Axis(grid[1,8], title="Voltage [V]")
+    current_ax =    GLMakie.Axis(grid[1,7], title="Current [A]", xlabel="[A]")
+    voltage_ax =    GLMakie.Axis(grid[1,8], title="Voltage [V]", xlabel="[V]")
     
     all_ax = [cold_ax, cold_flag_ax, warm_ax, warm_flag_ax, opt_ax, opt_flag_ax, current_ax, voltage_ax]
     
@@ -337,27 +337,32 @@ function stripchart_file(power_file::AbstractString, rtd_file::AbstractString)
     last_rtd_size = 0
     last_power_size = 0
     header_size = 8
-    frame_size_rtd_no_header = frame_size_rtd - header_size
-    frame_size_power_no_header = frame_size_power - header_size
+    frame_size_rtd_w_header = frame_size_rtd + header_size
+    frame_size_power_w_header = frame_size_pow + header_size
     
     while true
-        try
-            sleep(0.1)
+        # try
+            sleep(2)
+            println(".")
             # fm = FileMonitor(rtd_file)
             rtd_size = stat(rtd_file).size
             power_size = stat(power_file).size
-            rtd_size_diff = rtd_size - last_rtd_size - 8
-            power_size_diff = power_size - last_power_size - 8
-            if rtd_size_diff > 0
+            rtd_size_diff = rtd_size - last_rtd_size
+            power_size_diff = power_size - last_power_size
+            while rtd_size_diff > 0
+                println("got rtd")
+                data = zeros(UInt8, frame_size_rtd)
                 # get the last frame_size_rtd of data from the file
-                data = open(rtd_file) do f
+                d = open(rtd_file) do f
                     seekend(f)
-                    skip(f, -frame_size_rtd_no_header)
+                    skip(f, -(rtd_size_diff))
                     # read(f, String)
-                    read(f, Vector[UInt8])
+                    readbytes!(f, data, frame_size_rtd)
                 end
+                rtd_size_diff -= frame_size_rtd
+                last_rtd_size = rtd_size
                 # put header on it: [0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
-                rtd_header = [0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
+                rtd_header = UInt8[0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
                 rtd_data = [rtd_header; data]
                 # do the same parsing/plotting as below.
                 ret = parse_tlm(rtd_data; verbose=false, timestyle=:local)
@@ -378,18 +383,23 @@ function stripchart_file(power_file::AbstractString, rtd_file::AbstractString)
                     
                 else
                     # error
+                    println("chip lookup error!")
+                    println("data: ", rtd_data)
                 end
             end
             if power_size_diff > 0
+                println("got power")
                 # get the last frame_size_power of data from the file
-                data = open(power_file) do f
+                data = zeros(UInt8, frame_size_pow)
+                d = open(power_file) do f
                     seekend(f)
-                    skip(f, -frame_size_power_no_header)
+                    skip(f, -frame_size_pow)
                     # read(f, String)
-                    read(f, Vector[UInt8])
+                    readbytes!(f, data)
                 end
+                last_power_size = power_size
                 # put header on it: [0x02, 0, 1, 0, 1, 0x11, 0x00, 0x00]
-                power_header = [0x02, 0, 1, 0, 1, 0x11, 0x00, 0x00]
+                power_header = UInt8[0x02, 0, 1, 0, 1, 0x11, 0x00, 0x00]
                 power_data = [power_header; data]
                 # do the same parsing/plotting as below.
                 ret = parse_tlm(power_data; verbose=false, timestyle=:local)
@@ -398,46 +408,15 @@ function stripchart_file(power_file::AbstractString, rtd_file::AbstractString)
                 push!(curr_plot, time, values[pow_lookup_curr["indices"]])
                 push!(volt_plot, time, values[pow_lookup_volt["indices"]])
             end
-            mintime = min(cold_plot.times[]...)
-            maxtime = max(cold_plot.times[]...)
+            mintime = min(volt_plot.times[]...)
+            maxtime = max(volt_plot.times[]...)
             ylims!(cold_plot.axis, mintime, maxtime)
-            
-            # ret = parse_tlm(data; verbose=false, timestyle=:local)
-            # if !isnothing(ret)
-            #     if data[1] == 0x02 && data[6] == 0x12 # rtd
-            #         time, flags, temps, chip = ret
-            #         if chip == rtd_lookup_cold["chip"]
-            #             push!(cold_plot, time, temps[rtd_lookup_cold["indices"]])
-            #             push!(warm_plot, time, temps[rtd_lookup_warm["indices"]])
-                        
-            #             cold_flag = sum(flags[rtd_lookup_cold["indices"]] .!= 1)
-            #             warm_flag = sum(flags[rtd_lookup_warm["indices"]] .!= 1)
-            #             push!(cold_flag_plot, time, [cold_flag])
-            #             push!(warm_flag_plot, time, [warm_flag])
-                        
-            #         elseif chip == rtd_lookup_opt["chip"]
-            #             push!(opt_plot, time, temps[rtd_lookup_opt["indices"]])
-            #             opt_flag = sum(flags[rtd_lookup_opt["indices"]] .!= 1)
-            #             push!(opt_flag_plot, time, [opt_flag])
-                        
-            #         else
-            #             # error
-            #         end
-            #     elseif data[1] == 0x02 && data[6] == 0x11 # pow
-            #         time, values = ret
-            #         push!(curr_plot, time, values[pow_lookup_curr["indices"]])
-            #         push!(volt_plot, time, values[pow_lookup_volt["indices"]])
-            #     end
-                
-            #     mintime = min(cold_plot.times[]...)
-            #     maxtime = max(cold_plot.times[]...)
-            #     ylims!(cold_plot.axis, mintime, maxtime)
-            # end 
-        catch e
-            if e isa InterruptException
-                println("thank you for flying with FOXSI")
-                return 0
-            end
-        end
+
+    #     catch e
+    #         if e isa InterruptException
+    #             println("thank you for flying with FOXSI")
+    #             return 0
+    #         end
+    #     end
     end
 end

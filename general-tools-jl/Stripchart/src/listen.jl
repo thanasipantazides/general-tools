@@ -93,6 +93,7 @@ function parse_pow(frame::Vector{UInt8}; timestyle=:local)
 end
 
 function parse_rtd(frame::Vector{UInt8}; timestyle=:local)
+    # println(length(frame))
     @assert(length(frame) == frame_size_rtd)
     
     timestamp = parse_time(frame; timestyle=timestyle)
@@ -108,11 +109,15 @@ function parse_rtd(frame::Vector{UInt8}; timestyle=:local)
         this_flag = frame[this_index]
         this_raw = frame[this_index + 1:this_index + 3]
         temp_raw = reinterpret(UInt32, reverse([0x00;this_raw]))[1]
-        if (temp_raw & (1 << 23)) > 0
+        temp_int = Int32(0)
+        if (temp_raw >> 23) == 1
             temp_raw = (~temp_raw & 0xffffff)
-            temp_raw = -temp_raw + 1
+            temp_int = Int32(temp_raw)
+            temp_int = -temp_int + 1
+        else
+            temp_int = temp_raw
         end
-        this_temp = temp_raw / 1024
+        this_temp = temp_int / 1024
         
         flags[k+1] = this_flag
         temps[k+1] = this_temp
