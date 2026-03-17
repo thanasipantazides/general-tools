@@ -10,6 +10,9 @@ import pickle
 
 import pprint
 
+import subprocess
+from .relabel import relabel
+
 rtd_labels = {
     1: 'timepix',
     2: 'saas camera',
@@ -234,7 +237,8 @@ class StripChart:
                  readtimeformat='%H:%M:%S.%f',
                  maxnotelength=40,
                  figpath=None,
-                 annotateallplots=False):
+                 annotateallplots=False,
+                 log_to_note_offset_s=0):
         self.displaydatetimeformat = displaydatetimeformat
         self.readdatetimeformat = readdatetimeformat
         self.readtimeformat = readtimeformat
@@ -263,17 +267,26 @@ class StripChart:
         # log_to_note_offset = 100 # seconds
         # log_to_note_offset = 24*60 # seconds
         # log_to_note_offset = -1440 - 60*1.5
-        log_to_note_offset = -1362 # seconds
-        # log_to_note_offset = 0
+        # log_to_note_offset = -1362 # seconds
+        # log_to_note_offset = 10*60
 
         if isinstance(logfolder, list) and len(logfolder) > 0:
-            print(logfolder)
-            all_rtd_log = [Log(os.path.join(f, 'housekeeping_rtd.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset)) for f in logfolder]
-            all_pow_log = [Log(os.path.join(f, 'housekeeping_pow.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset)) for f in logfolder]
+            all_rtd_log = []
+            all_pow_log = []
+            for f in logfolder:
+                rtdpath = os.path.join(f, 'housekeeping_rtd.log')
+                powpath = os.path.join(f, 'housekeeping_pow.log')
+                if os.path.getsize(rtdpath) > 0:
+                    all_rtd_log.append(Log(rtdpath, abstimeoffset=datetime.timedelta(seconds=log_to_note_offset_s)))
+                if os.path.getsize(powpath) > 0:
+                    all_pow_log.append(Log(powpath, abstimeoffset=datetime.timedelta(seconds=log_to_note_offset_s)))
 
+            # all_rtd_log = [Log(os.path.join(f, 'housekeeping_rtd.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset)) for f in logfolder]
+            # all_pow_log = [Log(os.path.join(f, 'housekeeping_pow.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset)) for f in logfolder]
+            # [print(len(l.data.keys())) for l in all_rtd_log]
             all_rtd_log = sorted(all_rtd_log, key=lambda l: list(l.data.keys())[0])
             all_pow_log = sorted(all_pow_log, key=lambda l: list(l.data.keys())[0])
-            for k in range(0,len(logfolder)):
+            for k in range(0,min(len(all_pow_log), len(all_rtd_log))):
                 if k == 0:
                     self.powlog = all_pow_log[k]
                     self.rtdlog = all_rtd_log[k]
@@ -285,8 +298,8 @@ class StripChart:
         elif isinstance(logfolder, str):
             # self.powlog = Log(os.path.join(logfolder, 'housekeeping_pow.log'), abstimeoffset=datetime.timedelta(minutes=24))
             # self.rtdlog = Log(os.path.join(logfolder, 'housekeeping_rtd.log'), abstimeoffset=datetime.timedelta(minutes=24))
-            self.powlog = Log(os.path.join(logfolder, 'housekeeping_pow.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset))
-            self.rtdlog = Log(os.path.join(logfolder, 'housekeeping_rtd.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset))
+            self.powlog = Log(os.path.join(logfolder, 'housekeeping_pow.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset_s))
+            self.rtdlog = Log(os.path.join(logfolder, 'housekeeping_rtd.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset_s))
 
         # figure-tuning parameters:
         self.do_volt_rel = True     # display voltage as relative to mean for each channel, rather than absolute
@@ -553,6 +566,8 @@ class StripChart:
         pass
 
 if __name__ == "__main__":
+    # log_to_note_offset_s = 60*10
+    log_to_note_offset_s = 0
     if len(sys.argv) > 1:
         logfolders = ''
         try:
@@ -563,38 +578,69 @@ if __name__ == "__main__":
             all_paths = [os.path.join(sys.argv[1], c) for c in all_candidates]
             logfolders = [c for c in all_paths if os.path.isdir(c)]
     
+    if len(sys.argv) == 2:
+        all_candidates = os.listdir(sys.argv[1])
+        all_paths = [os.path.join(sys.argv[1], c) for c in all_candidates]
+        logfolders = [c for c in all_paths if os.path.isdir(c)]
+        notes_files = []
+        dates = []
+        for folder in logfolders:
+            this_notes = os.path.join(folder, "notes.txt")
+            relabel(folder, this_notes)
+            dates.append(detect_datetime_folder(folder))
+            notes_files.append(this_notes)
+
+        earliest_folder = min(logfolders, key=detect_datetime_folder)
+        folder_str = "" 
+        for file in notes_files:
+            folder_str += file+" "
+        subprocess.call("cat "+ folder_str + " | sort -n > " + os.path.join(earliest_folder, "merged_notes.txt"), shell=True)
+        
+        # topfoldername = os.path.basename(os.path.join(sys.argv[1], '..'))
+        figname = "stripchart-"+detect_datetime_folder(earliest_folder).strftime("%-d%b%Y").lower()+"-merged.pdf"
+        figname = os.path.join(sys.argv[1], figname)
+        
+        s = StripChart(
+            log_to_note_offset_s=log_to_note_offset_s, 
+            logfolder=logfolders, 
+            notes=os.path.join(earliest_folder, "merged_notes.txt"), 
+            figpath=figname, 
+            annotateallplots=False)
+        
+        sys.exit()
+        
     if len(sys.argv) == 3:
-        s = StripChart(logfolder=logfolders, notes=sys.argv[2], annotateallplots=True)
+        s = StripChart(log_to_note_offset_s=log_to_note_offset_s, logfolder=logfolders, notes=sys.argv[2], annotateallplots=True)
     if len(sys.argv) == 4:
-        s = StripChart(logfolder=logfolders, notes=sys.argv[2], figpath=sys.argv[3], annotateallplots=False)
+        s = StripChart(log_to_note_offset_s=log_to_note_offset_s, logfolder=logfolders, notes=sys.argv[2], figpath=sys.argv[3], annotateallplots=False)
     
-    cmos_in_file = os.path.abspath(os.path.expanduser('~/Documents/FOXSI/Data/formatter/logs/2025/aug28/cmos_power.csv'))
-    cmos_out_file = os.path.abspath(os.path.expanduser('~/Documents/FOXSI/Data/formatter/logs/2025/aug28/cmos_power_window.csv'))
-    if cmos_in_file:
-        with open(cmos_in_file, 'w') as f:
-            f.write(s.cmos_curr_data)
-        import csv
-        with open(cmos_out_file, newline='') as f:
-            reader = csv.reader(f, delimiter=',')
-            times = []
-            cmos1_current = []
-            cmos3_current = []
-            for k,row in enumerate(reader):
-                if k == 0: continue
-                times.append(datetime.datetime.strptime(row[0], '%b %d %Y %H:%M:%S.%f'))
-                cmos1_current.append(float(row[1]))
-                cmos3_current.append(float(row[2]))
+    # cmos_in_file = os.path.abspath(os.path.expanduser('~/Documents/FOXSI/Data/formatter/logs/2025/aug28/cmos_power.csv'))
+    # cmos_out_file = os.path.abspath(os.path.expanduser('~/Documents/FOXSI/Data/formatter/logs/2025/aug28/cmos_power_window.csv'))
+    # if cmos_in_file:
+    #     with open(cmos_in_file, 'w') as f:
+    #         f.write(s.cmos_curr_data)
+    #     import csv
+    #     with open(cmos_out_file, newline='') as f:
+    #         reader = csv.reader(f, delimiter=',')
+    #         times = []
+    #         cmos1_current = []
+    #         cmos3_current = []
+    #         for k,row in enumerate(reader):
+    #             if k == 0: continue
+    #             times.append(datetime.datetime.strptime(row[0], '%b %d %Y %H:%M:%S.%f'))
+    #             cmos1_current.append(float(row[1]))
+    #             cmos3_current.append(float(row[2]))
             
-            fig,ax = plt.subplots(1,1)
-            c1p = ax.plot(times, cmos1_current, linewidth=0.5, label='CMOS 1', color='red')
-            c2p = ax.plot(times, cmos3_current, linewidth=0.5, label='CMOS 3', color='blue')
-            ax.xaxis.set_major_formatter(mpl.dates.DateFormatter('%H:%M'))
-            ax.grid(visible=True, which='both', axis='both')
-            ax.set_xlabel('Time (PDT, on Aug 28 2025)')
-            ax.set_ylabel('Current [A]')
-            ax.set_ylim([0, 1])
-            ax.tick_params(axis='x', rotation=45)
-            ax.legend()
-            plt.tight_layout()
-            figsavepath = os.path.join(os.path.dirname(cmos_out_file), 'cmos_power_plot.pdf')
-            fig.savefig(figsavepath, transparent=True)
+    #         fig,ax = plt.subplots(1,1)
+    #         c1p = ax.plot(times, cmos1_current, linewidth=0.5, label='CMOS 1', color='red')
+    #         c2p = ax.plot(times, cmos3_current, linewidth=0.5, label='CMOS 3', color='blue')
+    #         ax.xaxis.set_major_formatter(mpl.dates.DateFormatter('%H:%M'))
+    #         ax.grid(visible=True, which='both', axis='both')
+    #         ax.set_xlabel('Time (PDT, on Aug 28 2025)')
+    #         ax.set_ylabel('Current [A]')
+    #         ax.set_ylim([0, 1])
+    #         ax.tick_params(axis='x', rotation=45)
+    #         ax.legend()
+    #         plt.tight_layout()
+    #         figsavepath = os.path.join(os.path.dirname(cmos_out_file), 'cmos_power_plot.pdf')
+    #         fig.savefig(figsavepath, transparent=True)
