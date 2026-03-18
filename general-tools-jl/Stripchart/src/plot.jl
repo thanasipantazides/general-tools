@@ -1,6 +1,19 @@
 using Dates
 using GLMakie
 
+function julia_main()::Cint
+    if length(ARGS) == 1
+        power_file = abspath(joinpath(ARGS[1], "housekeeping_pow.log"))
+        rtd_file = abspath(joinpath(ARGS[1], "housekeeping_rtd.log"))
+        stripchart_file(power_file, rtd_file)
+    elseif length(ARGS) == 0
+        println("unimplemented!")
+        # stripchart(joinpath(homedir(), "Documents", "GSE-FOXSI-4", "logs", "received", ))
+    else
+        println("unrecognized arguments!")
+    end
+end
+
 mutable struct Printer
     axis::GLMakie.Axis
     data::Vector{Observable{Vector{<:Real}}} 

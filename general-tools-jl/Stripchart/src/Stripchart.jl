@@ -11,6 +11,7 @@ include("plot.jl")
 
 # export System
 # export PacketType
+export julia_main
 export udp_setup, parse_rtd, parse_pow, parse_time, parse_tlm, sys_type
 export stripchart, stripchart_file, Printer, push!
 
