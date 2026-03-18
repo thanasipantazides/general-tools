@@ -33,6 +33,7 @@ def do_cdte(path):
 def do_cmos(path):
     with open(path, 'rb') as f:
         data = f.read()
+        cmosn = os.path.basename(path).split('_')[0]
         framesize = 0x218
         length = len(data) // framesize
         offset = 0xa4
@@ -54,7 +55,7 @@ def do_cmos(path):
     ax2.set_ylabel('PPS linetime differences, via telemetry [s]')
     ax2.set_ylim([0,6])
     ax2.set_xlim([50,130])
-    plt.savefig(os.path.join(os.path.dirname(os.path.abspath(path)), 'cmos_pps.pdf'))
+    plt.savefig(os.path.join(os.path.dirname(os.path.abspath(path)), cmosn+'_pps.pdf'))
     plt.show()
 
 if __name__ == "__main__":
