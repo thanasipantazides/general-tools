@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <math.h>
+#include <unistd.h>
 
 #define PSEP "/"
 #ifdef _WIN32
@@ -15,6 +16,11 @@
 // bit depth of a pixel
 #define TU unsigned short
 
+const char *getext(const char *filename) {
+    const char *dot = strrchr(filename, '.');
+    if(!dot || dot == filename) return "";
+    return dot + 1;
+}
 int isfile(const char* fname_candidate) {
     const char* dot = strchr(fname_candidate, '.');
     if (dot != NULL && dot != fname_candidate && *(dot + 1) != '\0') {
@@ -61,14 +67,18 @@ int write_pgm(const char* fname, unsigned short img[]) {
     //     }
     //     fputs("\n", fh);
     // }
-    for (unsigned short i = 0; i < PY; ++i) {
-        for (unsigned short j = 0; j < PX; ++j) {
-            // printf("i=%6u, j=%6u, u=%u\n", i, j, i*PY + j);
-            char thisbuf[7];
-            fprintf(fh, "%6u", img[i+j*PY]);
-            // fputs(thisbuf, fh);
-        }
-        fputs("\n", fh);
+    // for (unsigned short i = 0; i < PY; ++i) {
+    //     for (unsigned short j = 0; j < PX; ++j) {
+    //         // printf("i=%6u, j=%6u, u=%u\n", i, j, i*PY + j);
+    //         char thisbuf[7];
+    //         fprintf(fh, "%6u", img[i+j*PY]);
+    //         // fputs(thisbuf, fh);
+    //     }
+    //     fputs("\n", fh);
+    // }
+    for (unsigned long ii = 0; ii < PX*PY; ++ii) {
+        char thisbuf[7];
+        fprintf(fh, "%6u", img[ii]);
     }
     fclose(fh);
     // current_length += snprintf(outbuff + current_length, BUFFER_SIZE - current_length, "%6u", this);
@@ -121,12 +131,32 @@ unsigned long total_files = 0;
 
 int main (int argc, char** argv) {
     if (argc < 4) {
-        printf("run like this:\n\t>./mkpgm folder/of/input/files path/to/darkframe.dat path/to/output\n");
+        printf("run like this:\n\t>./mkpgm -i folder/of/input/files -o path/to/output/file.pgm [-d path/to/darkframe.dat]\n");
         return -1;
     }
     
-    const char* search_dir = argv[1];
-    const char* save_path = argv[3];
+    char *search_dir = NULL;
+    char *save_path = NULL;
+    char *dark_path = NULL;
+    int c;
+    while ((c = getopt (argc, argv, "i:o:d:")) != -1) {
+        switch (c) {
+            case 'i':
+                search_dir = optarg;
+                break;
+            case 'o':
+                save_path = optarg;
+                break;
+            case 'd':
+                dark_path = optarg;
+                break;
+            default:
+                abort();
+        }
+    }
+    
+    // const char* search_dir = argv[1];
+    // const char* save_path = argv[3];
     printf("searching under %s\n", search_dir);
     printf("saving to %s\n", save_path);
 
@@ -164,11 +194,34 @@ int main (int argc, char** argv) {
         }
         closedir(dir);
         
-        // write_ql(save_path, img_out);
-        // linscale(img_out, 65535);
-        write_pgm(save_path, img_out);
-        printf("> saved average output to %s\n", save_path);
         printf("> found %lu files with wrong length out of %lu\n", wrong_size_count, img_count);
+        
+        // linscale(img_out, 65535);
+        if (dark_path != NULL) {
+            printf("> subtracting dark image from %s\n", dark_path);
+            FILE *fh = fopen(dark_path, "rb");
+            if (fh == NULL) {
+                return -1;
+            }
+            unsigned long read_size = fread(read_buf, sizeof(unsigned short), PX*PY, fh);
+            if (read_size != PX*PY) {
+                printf("\twrong size, skipping dark frame subtraction.\n");
+            } else {
+                subtract_darkness(img_out, read_buf);
+            }
+        }
+        
+        if (strcmp(getext(save_path), "pgm") == 0) {
+            write_pgm(save_path, img_out);
+            printf("> saved average output to PGM file %s\n", save_path);
+        } else if (strcmp(getext(save_path), "dat") == 0) {
+            write_ql(save_path, img_out);
+            printf("> saved average output to raw file %s\n", save_path);
+        } else {
+            printf("> undefined extension %s! Use .pgm or .dat.\n", getext(save_path));
+        }
+            
+        
         
     } else {
         // return -1;

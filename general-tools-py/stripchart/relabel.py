@@ -22,7 +22,7 @@ def command_deck(path):
                     for cmd in cmd_config:
                         cmd_hex = int(cmd["hex"], base=16)
                         deck[sys_hex]["commands"][cmd_hex] = cmd["name"]
-    print("\nbuilt command deck")
+    # print("\nbuilt command deck")
     return deck
 
 def detect_datetime(name):
@@ -46,14 +46,10 @@ def detect_datetime(name):
         start = None
     return start
 
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("\nrun like this:\n>\tpython relabel.py uplink/log/folder/28-8-2025_11-35-1 path/to/output/file.log")
-    print("reading from:", sys.argv[1])
-    print("writing to:", sys.argv[2])
-    start = detect_datetime(sys.argv[1])
+def relabel(infolder, outfile):
+    print("\t> relabling from:", infolder)
+    print("\t> writing to:", outfile)
+    start = detect_datetime(infolder)
     deck = command_deck(os.path.join(os.path.dirname(__file__), '..', '..', 'external', 'foxsi4-commands'))
 
     times = []
@@ -63,9 +59,7 @@ if __name__ == "__main__":
 
     ostream = ""
 
-    print("start:", start)
-
-    with open(os.path.join(sys.argv[1], 'uplink.log'), 'r') as uplink_file:
+    with open(os.path.join(infolder, 'uplink.log'), 'r') as uplink_file:
         for line in uplink_file.readlines():
             try:
                 tstamp = re.search('\[(.+?)\]', line).group(1)
@@ -76,7 +70,7 @@ if __name__ == "__main__":
             delta = datetime.timedelta(days=0.0, hours=raw_time.hour, minutes=raw_time.minute, seconds=raw_time.second)
             # time_mv = datetime.datetime.combine(start, raw_time.time())
             time_mv = start + delta
-            print(time_mv)
+            # print(time_mv)
             times.append(time_mv)
             cmd_raw = line.split(' ', 1)[1].rstrip()
             commands.append(cmd_raw)
@@ -88,13 +82,67 @@ if __name__ == "__main__":
             cmd_name = deck[sys_int]["commands"][cmd_int]
             
             # optional offset to add to the recorded time:
-            delta = datetime.timedelta(minutes=-25)
+            delta = datetime.timedelta(minutes=0)
             time_mv += delta
 
             otime = datetime.datetime.strftime(time_mv, '%H:%M:%S')
 
             ostream = ostream + otime + ' - ' + sys_name + ' > ' + cmd_name + ' (' + cmd_raw + ')\n'
 
-    with open(sys.argv[2], 'w') as output_file:
+    with open(outfile, 'w') as output_file:
         output_file.write(ostream)
+
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("\nrun like this:\n>\tpython relabel.py uplink/log/folder/28-8-2025_11-35-1 path/to/output/file.log")
+    
+    relabel(sys.argv[1], sys.argv[2])
+    # print("reading from:", sys.argv[1])
+    # print("writing to:", sys.argv[2])
+    # start = detect_datetime(sys.argv[1])
+    # deck = command_deck(os.path.join(os.path.dirname(__file__), '..', '..', 'external', 'foxsi4-commands'))
+
+    # times = []
+    # commands = []
+    # systems = []
+    # names = []
+
+    # ostream = ""
+
+    # print("start:", start)
+
+    # with open(os.path.join(sys.argv[1], 'uplink.log'), 'r') as uplink_file:
+    #     for line in uplink_file.readlines():
+    #         try:
+    #             tstamp = re.search('\[(.+?)\]', line).group(1)
+    #         except AttributeError:
+    #             continue
+            
+    #         raw_time = datetime.datetime.strptime(tstamp, "%H:%M:%S.%f")
+    #         delta = datetime.timedelta(days=0.0, hours=raw_time.hour, minutes=raw_time.minute, seconds=raw_time.second)
+    #         # time_mv = datetime.datetime.combine(start, raw_time.time())
+    #         time_mv = start + delta
+    #         print(time_mv)
+    #         times.append(time_mv)
+    #         cmd_raw = line.split(' ', 1)[1].rstrip()
+    #         commands.append(cmd_raw)
+    #         cmd_raw_int = int(cmd_raw, base=16)
+    #         sys_int = (cmd_raw_int >> 8) & 0xff
+    #         cmd_int = (cmd_raw_int >> 0) & 0xff
+
+    #         sys_name = deck[sys_int]["name"]
+    #         cmd_name = deck[sys_int]["commands"][cmd_int]
+            
+    #         # optional offset to add to the recorded time:
+    #         delta = datetime.timedelta(minutes=0)
+    #         time_mv += delta
+
+    #         otime = datetime.datetime.strftime(time_mv, '%H:%M:%S')
+
+    #         ostream = ostream + otime + ' - ' + sys_name + ' > ' + cmd_name + ' (' + cmd_raw + ')\n'
+
+    # with open(sys.argv[2], 'w') as output_file:
+    #     output_file.write(ostream)
 
