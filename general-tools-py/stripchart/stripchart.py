@@ -4,6 +4,7 @@ import bisect
 import argparse
 import matplotlib as mpl
 from matplotlib import pyplot as plt
+from matplotlib.ticker import AutoMinorLocator, LinearLocator
 import numpy as np
 
 import pickle
@@ -183,36 +184,44 @@ class Log:
             from ..rtd.rtd import Parser
             self.frame_size = 42
             parsed = Parser(log)
-
+            
             chip_channel_offset = {1:1,2:12}
+            drop_flag = False # drop rtd data with flags raised instead of plotting it
+            p = 0
             for chip in [1,2]:
+                print("\n")
                 unixtimes = np.array([int.from_bytes(field['unixtime'],'big') for field in parsed.rtd_data[chip]], dtype=np.uint32)
-                reltimes = unixtimes - np.min(unixtimes)
+                reltimes = unixtimes - unixtimes[0]
                 abstimes = [start_datetime + datetime.timedelta(seconds=time.item()) for time in reltimes]
                 d = {}
                 for t, data in zip(abstimes, parsed.rtd_data[chip]):
-                    d[t] = {k + chip_channel_offset[chip]: data['data'][k] for k in data['data']}
-                    if t in self.data.keys():
-                        self.data[t].update(d[t])
+                    p += 1
+                    if drop_flag and any([1 != data['data'][k]['flag'] for k in data['data']]):
+                        print(f"dropping time {t}")
+                        continue
                     else:
-                        self.data[t] = d[t]
-
-            # structure of self.data: keys are datetimes, values are dicts keyed by RTD sensor number (1-9, 12-20).
-            #      self.data[t][7]['temp'] is the temperature
-            #      self.data[t][7]['flag'] is the flag
+                        d[t] = {k + chip_channel_offset[chip]: data['data'][k] for k in data['data'].keys()}
+                        if t in self.data.keys():
+                            self.data[t].update(d[t])
+                        else:
+                            self.data[t] = d[t]
                 
         elif fname == 'housekeeping_pow.log':
             from external.telemetry_tools.parsers.Powerparser import adcparser
             self.frame_size = 38
             print('parsing ', log)
             parsed = []
+            framecount = 0
             for d in fragment_bytes(raw, self.frame_size):
                 res = adcparser(d)
                 if res[1]:
+                    print(f">\tfor frame index {framecount}")
+                    framecount += 1
                     continue
                 else:
                     parsed.append(res)
-            
+                    framecount += 1
+            print(f">\tframe total: {framecount}")
             d = {}
             unixtime0 = 0
             for k,frame in enumerate(parsed):
@@ -276,6 +285,7 @@ class StripChart:
             for f in logfolder:
                 rtdpath = os.path.join(f, 'housekeeping_rtd.log')
                 powpath = os.path.join(f, 'housekeeping_pow.log')
+                # merge the logs
                 if os.path.getsize(rtdpath) > 0:
                     all_rtd_log.append(Log(rtdpath, abstimeoffset=datetime.timedelta(seconds=log_to_note_offset_s)))
                 if os.path.getsize(powpath) > 0:
@@ -284,16 +294,22 @@ class StripChart:
             # all_rtd_log = [Log(os.path.join(f, 'housekeeping_rtd.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset)) for f in logfolder]
             # all_pow_log = [Log(os.path.join(f, 'housekeeping_pow.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset)) for f in logfolder]
             # [print(len(l.data.keys())) for l in all_rtd_log]
+            
+            # sort the logs
             all_rtd_log = sorted(all_rtd_log, key=lambda l: list(l.data.keys())[0])
             all_pow_log = sorted(all_pow_log, key=lambda l: list(l.data.keys())[0])
-            for k in range(0,min(len(all_pow_log), len(all_rtd_log))):
+            
+            # flatten the logs
+            for k in range(0,len(all_pow_log)):
                 if k == 0:
                     self.powlog = all_pow_log[k]
-                    self.rtdlog = all_rtd_log[k]
                 else:
                     self.powlog.data.update(all_pow_log[k].data)
+            for k in range(0,len(all_rtd_log)):
+                if k == 0:
+                    self.rtdlog = all_rtd_log[k]
+                else:
                     self.rtdlog.data.update(all_rtd_log[k].data)
-
             # raise NotImplementedError
         elif isinstance(logfolder, str):
             # self.powlog = Log(os.path.join(logfolder, 'housekeeping_pow.log'), abstimeoffset=datetime.timedelta(minutes=24))
@@ -302,7 +318,7 @@ class StripChart:
             self.rtdlog = Log(os.path.join(logfolder, 'housekeeping_rtd.log'), abstimeoffset=datetime.timedelta(seconds=log_to_note_offset_s))
 
         # figure-tuning parameters:
-        self.do_volt_rel = True     # display voltage as relative to mean for each channel, rather than absolute
+        self.do_volt_rel = False     # display voltage as relative to mean for each channel, rather than absolute
         self.smooth_current_n = 2  # rolling average bin size for current values (which are very noisy)
 
         self.setup_plot()
@@ -355,51 +371,71 @@ class StripChart:
         self.ax['cold_data'].yaxis.set_major_formatter(mpl.dates.DateFormatter('%H:%M:%S'))
         self.ax['cold_data'].set_ylabel('Time')
         
-        [ax.grid(visible=True, which='both', axis='both') for ax in self.all_axes]
+        [ax.grid(visible=True, which='major', axis='both') for ax in self.all_axes]
         [ax.tick_params(axis="x", bottom=True, top=True, labelbottom=True, labeltop=True) for ax in self.all_axes]
-
+        [ax.yaxis.set_minor_locator(AutoMinorLocator(5)) for ax in self.all_axes]
+        [ax.tick_params(axis='y', left=True, right=True, length=2) for ax in self.all_axes]
         self.ax['notes'].axis('off')
 
         plt.subplots_adjust(wspace=0.02, hspace=0)
         plt.tight_layout()
    
     def provision_data(self):
-        
         self.rtd_times = list(self.rtdlog.data.keys())
+        self.rtd_utimes = [t.timestamp() for t in self.rtd_times]
         
         self.cold_sensors = [5, 6, 7, 8, 9]
         self.hot_sensors = [1, 2, 3, 4]
         self.opt_sensors = [12, 13, 14, 15, 16, 17, 18, 19, 20]
-        self.cold_data = np.zeros((len(self.rtd_times), len(self.cold_sensors)), dtype=np.float32)
-        self.cold_flag_data = np.zeros((len(self.rtd_times), 1), dtype=np.float32)
-        self.hot_data = np.zeros((len(self.rtd_times), len(self.hot_sensors)), dtype=np.float32)
-        self.hot_flag_data = np.zeros((len(self.rtd_times), 1), dtype=np.float32)
-        self.opt_data = np.zeros((len(self.rtd_times), len(self.opt_sensors)), dtype=np.float32)
-        self.opt_flag_data = np.zeros((len(self.rtd_times), 1), dtype=np.float32)
+        self.cold_times = [key for key in self.rtd_times if self.cold_sensors[0] in self.rtdlog.data[key].keys()]
+        self.hot_times = [key for key in self.rtd_times if self.hot_sensors[0] in self.rtdlog.data[key].keys()]
+        self.opt_times = [key for key in self.rtd_times if self.opt_sensors[0] in self.rtdlog.data[key].keys()]
+        
+        self.cold_data = np.zeros((len(self.cold_times), len(self.cold_sensors)), dtype=np.float32)
+        self.cold_flag_data = np.zeros((len(self.cold_times), 1), dtype=np.float32)
+        self.hot_data = np.zeros((len(self.hot_times), len(self.hot_sensors)), dtype=np.float32)
+        self.hot_flag_data = np.zeros((len(self.hot_times), 1), dtype=np.float32)
+        self.opt_data = np.zeros((len(self.opt_times), len(self.opt_sensors)), dtype=np.float32)
+        self.opt_flag_data = np.zeros((len(self.opt_times), 1), dtype=np.float32)
+        cold_count = 0
+        hot_count = 0
+        opt_count = 0
         for k,key in enumerate(self.rtd_times):
-            for s,sensor in zip(range(len(self.cold_sensors)), self.cold_sensors):
-                if sensor in self.rtdlog.data[key].keys():
-                    if self.rtdlog.data[key][sensor]['flag'] == 1:
-                        self.cold_data[k,s] = self.rtdlog.data[key][sensor]['temp']
-                    else:
-                        self.cold_flag_data[k] += 1
-                        self.cold_data[k,s] = np.nan
-            for s,sensor in zip(range(len(self.hot_sensors)), self.hot_sensors):
-                if sensor in self.rtdlog.data[key].keys():
-                    if self.rtdlog.data[key][sensor]['flag'] == 1:
-                        self.hot_data[k,s] = self.rtdlog.data[key][sensor]['temp']
-                    else:
-                        self.hot_flag_data[k] += 1
-                        self.hot_data[k,s] = np.nan
-            for s,sensor in zip(range(len(self.opt_sensors)), self.opt_sensors):
-                if sensor in self.rtdlog.data[key].keys():
-                    if self.rtdlog.data[key][sensor]['flag'] == 1:
-                        self.opt_data[k,s] = self.rtdlog.data[key][sensor]['temp']
-                    else:
-                        self.opt_flag_data[k] += 1
-                        self.opt_data[k,s] = np.nan
+            if key in self.cold_times:
+                for s,sensor in zip(range(len(self.cold_sensors)), self.cold_sensors):
+                    if sensor in self.rtdlog.data[key].keys():
+                        if self.rtdlog.data[key][sensor]['flag'] == 1:
+                            self.cold_data[cold_count,s] = self.rtdlog.data[key][sensor]['temp']
+                        else:
+                            self.cold_flag_data[cold_count] += 1
+                            self.cold_data[cold_count,s] = np.nan
+                cold_count += 1
+            if key in self.hot_times:
+                for s,sensor in zip(range(len(self.hot_sensors)), self.hot_sensors):
+                    if sensor in self.rtdlog.data[key].keys():
+                        if self.rtdlog.data[key][sensor]['flag'] == 1:
+                            self.hot_data[hot_count,s] = self.rtdlog.data[key][sensor]['temp']
+                        else:
+                            self.hot_flag_data[hot_count] += 1
+                            self.hot_data[hot_count,s] = np.nan
+                hot_count += 1
+            if key in self.opt_times:
+                for s,sensor in zip(range(len(self.opt_sensors)), self.opt_sensors):
+                    if sensor in self.rtdlog.data[key].keys():
+                        if self.rtdlog.data[key][sensor]['flag'] == 1:
+                            self.opt_data[opt_count,s] = self.rtdlog.data[key][sensor]['temp']
+                        else:
+                            self.opt_flag_data[opt_count] += 1
+                            self.opt_data[opt_count,s] = np.nan
+                opt_count += 1
 
+        p = np.array([t.timestamp() for t in self.opt_times]).argsort()
+        self.opt_times = [self.opt_times[p[i]] for i in range(len(p))]
+        self.opt_flag_data = self.opt_flag_data[p[:]]
+        self.opt_data = self.opt_data[p[:]]
+        
         self.pow_times = list(self.powlog.data.keys())
+        self.pow_utimes = [t.timestamp() for t in self.pow_times]
         self.volt_sensors = [0, 1, 2, 3]
         self.curr_sensors = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         self.volt_data = np.zeros((len(self.pow_times), len(self.volt_sensors)), dtype=np.float32)
@@ -424,37 +460,122 @@ class StripChart:
                 self.volt_data[:,m] = self.volt_data[:,m] - np.mean(self.volt_data[:,m])
 
     def plot_all(self):
-        self.ax['cold_data'].plot(self.cold_data, self.rtd_times, label=[rtd_labels[s] for s in self.cold_sensors])
-        self.ax['cold_flag'].plot(self.cold_flag_data, self.rtd_times, color='black')
-        self.ax['hot_data'].plot(self.hot_data, self.rtd_times, label=[rtd_labels[s] for s in self.hot_sensors])
-        self.ax['hot_flag'].plot(self.hot_flag_data, self.rtd_times, color='black')
-        # self.ax['opt_data'].plot(self.opt_data, self.rtd_times, marker='+', markersize=4, label=[rtd_labels[s] for s in self.opt_sensors])
-        self.ax['opt_data'].plot(self.opt_data, self.rtd_times, label=[rtd_labels[s] for s in self.opt_sensors])
-        self.ax['opt_flag'].plot(self.opt_flag_data, self.rtd_times, color='black')
-
-        [ax.set_xlim([-1, 9]) for ax in self.flag_axes]
-
-        self.ax['volt'].plot(self.volt_data, self.pow_times, label=[pow_labels[s] for s in self.volt_sensors])
-        self.ax['curr'].plot(self.curr_data, self.pow_times, label=[pow_labels[s] for s in self.curr_sensors])
-
+        
+        do_scatter = False
+        if do_scatter:
+            msize = 1.0
+            [self.ax['cold_data'].scatter(self.cold_data[:,k], self.cold_times, s=msize, label=rtd_labels[s]) for (k,s) in enumerate(self.cold_sensors)]
+            self.ax['cold_flag'].scatter(self.cold_flag_data, self.cold_times, s=msize, color='black')
+            [self.ax['hot_data'].scatter(self.hot_data[:,k], self.hot_times, s=msize, label=rtd_labels[s]) for (k,s) in enumerate(self.hot_sensors)]
+            self.ax['hot_flag'].scatter(self.hot_flag_data, self.hot_times, s=msize, color='black')
+            
+            [self.ax['opt_data'].scatter(self.opt_data[:,k], self.opt_times, s=msize, label=rtd_labels[s]) for (k,s) in enumerate(self.opt_sensors)]
+            self.ax['opt_flag'].scatter(self.opt_flag_data, self.opt_times, s=msize, color='black')
+    
+            [ax.set_xlim([-1, 9]) for ax in self.flag_axes]
+    
+            self.ax['volt'].plot(self.volt_data, self.pow_times, label=[pow_labels[s] for s in self.volt_sensors])
+            self.ax['curr'].plot(self.curr_data, self.pow_times, label=[pow_labels[s] for s in self.curr_sensors])
+        else:
+            self.ax['cold_data'].plot(self.cold_data, self.cold_times, label=[rtd_labels[s] for s in self.cold_sensors])
+            self.ax['cold_flag'].plot(self.cold_flag_data, self.cold_times, color='black')
+            self.ax['hot_data'].plot(self.hot_data, self.hot_times, label=[rtd_labels[s] for s in self.hot_sensors])
+            self.ax['hot_flag'].plot(self.hot_flag_data, self.hot_times, color='black')
+            
+            self.ax['opt_data'].plot(self.opt_data, self.opt_times, label=[rtd_labels[s] for s in self.opt_sensors])
+            self.ax['opt_flag'].plot(self.opt_flag_data, self.opt_times, color='black')
+    
+            [ax.set_xlim([-1, 9]) for ax in self.flag_axes]
+    
+            self.ax['volt'].plot(self.volt_data, self.pow_times, label=[pow_labels[s] for s in self.volt_sensors])
+            self.ax['curr'].plot(self.curr_data, self.pow_times, label=[pow_labels[s] for s in self.curr_sensors])
+            
         for name in self.legendary_axis_names:
             h,l = self.ax[name].get_legend_handles_labels()
             laxis_name = name + '_leg'
             self.ax[laxis_name].legend(h,l, borderaxespad=0, fontsize='x-small', loc='upper center')
             self.ax[laxis_name].axis('off')
 
-        for note_time in self.notes.keys():
-            self.ax['notes'].annotate(
-                self.notes[note_time],
-                xy=(0,note_time),
-                xytext=(0,note_time),
-                fontsize='xx-small', ha='left', va='baseline'
-            )
-            if self.annotateallplots:
-                [ax.axhline(note_time, color='black', linewidth=0.1) for ax in self.all_axes]
-            else:
-                self.ax['notes'].axhline(note_time, color='black', linewidth=0.1)
+        # handle note display:
+        magic_divider = 150 # THIS DEPENDS ON NOTE FONT SIZE; ADJUST IF FONT CHANGES
+        duration = max(self.rtd_times) - min(self.rtd_times)
+        heightbox = duration / magic_divider # this is a datetime.timedelta
 
+        jogpad = 0.1
+        jogwidth = 0.1
+
+        clusters = {}
+        note_values = []
+        note_times = []
+        
+        last_time = None
+        ccount = -1
+        for k, note_time in enumerate(sorted(self.notes.keys())):
+            # assumes note times are are sorted already:
+            if last_time is None:
+                last_time = note_time
+                continue
+
+            # if two notes closer together than the height limit
+            if (note_time - last_time) < heightbox:
+                # if this one is a continuation of an existing cluster, add it to that cluster.
+                # otherwise, make a new cluster. Also, if this is the first cluster, make the first cluster.
+                if len(clusters.keys()) == 0:
+                    ccount += 1
+                    clusters[ccount] = {'index': [k]}
+                else:
+                    if k - max(clusters[ccount]['index']) == 1:
+                        clusters[ccount]['index'].append(k)
+                    else:
+                        ccount += 1
+                        clusters[ccount] = {'index': [k-1, k]}
+        
+            last_time = note_time
+
+        # clusters[cluster_count]['index'] stores indices into self.notes.keys() which ought to be clustered
+        kdone = []
+        key_v = list(self.notes.keys())
+        start_datetime = min(key_v)
+        for c in clusters.keys(): # populate data for each cluster
+            clusters[c]['pretimes'] = [key_v[k] for k in clusters[c]['index']]
+            clusters[c]['notes'] = [self.notes[key_v[k]] for k in clusters[c]['index']]
+            clusters[c]['centroid'] = start_datetime + np.sum([ctime - start_datetime for ctime in clusters[c]['pretimes']]) / len(clusters[c]['pretimes'])
+            thisheight = len(clusters[c]['pretimes'])*heightbox
+            ymin = clusters[c]['centroid']     # may want to tweak this to deconflict clusters from one another
+            clusters[c]['posttimes'] = [ymin + k*heightbox for k in range(len(clusters[c]['pretimes']))]
+
+            for k in range(len(clusters[c]['index'])):
+                self.ax['notes'].annotate(
+                    self.notes[clusters[c]['pretimes'][k]],
+                    xy=(jogpad + jogwidth, clusters[c]['posttimes'][k]),
+                    fontsize='xx-small', ha='left', va='baseline', fontname='monospace', color='black'
+                )
+                self.ax['notes'].plot(
+                    [0.0, jogwidth, jogpad + jogwidth, 2],
+                    [clusters[c]['pretimes'][k], clusters[c]['pretimes'][k], clusters[c]['posttimes'][k], clusters[c]['posttimes'][k]],
+                    color='black', linewidth=0.1
+                )
+                # mark which global note indices have been dealt with already in clusters
+                kdone.append(clusters[c]['index'][k])
+        
+        # plot all the non-clustered notes
+        for k,note_time in enumerate(self.notes.keys()):
+            if k not in kdone:
+                # color = 'red' if k in flat_clusters else 'black'
+                self.ax['notes'].annotate(
+                    self.notes[note_time],
+                    xy=(jogpad + jogwidth, note_time),
+                    fontsize='xx-small', ha='left', va='baseline', fontname='monospace', color='black'
+                )
+                self.ax['notes'].plot([0, 2], [note_time, note_time], color='black', linewidth=0.1)
+            # TURN THIS ON TO VISUALLY TUNE FONT HEIGHT:
+            # self.ax['notes'].axhline(note_time + duration/magic_divider, color='red', linewidth=0.1)
+            if self.annotateallplots:
+                [ax.axhline(note_time, color='black', linewidth=0.1) for ax in self.all_axes if ax is not self.ax['notes']]
+            
+                
+                
+                
         self.ax['cold_data'].set_ylim([min(self.rtd_times), max(self.rtd_times)])
         
         startdate = min(self.rtd_times[0], self.pow_times[0])
@@ -470,6 +591,7 @@ class StripChart:
 
             self.fig.set_size_inches(11,17)
             plt.tight_layout()
+            plt.subplots_adjust(wspace=0.05, hspace=0.05)
             self.fig.savefig(self.figpath, transparent=True)
             self.fig.set_size_inches(14,8)
             plt.tight_layout()
@@ -565,9 +687,29 @@ class StripChart:
     def push(self, dataframe=bytes(), noteline=""):
         pass
 
+
+"""
+Easiest way to use this: 
+    > cd general-tools
+    > python -m general-tools-py.stripchart.stripchart /path/to/some/FOXSI/GSE/log/folder/
+
+You want to run this from the top-level `general-tools/` folder because I use relative paths from 
+that folder to get to parsers included in `general-tools`.
+
+The path argument you pass should contain one or more GSE log-style datestamped folder, i.e. 
+a folder that looks like 23-4-2026_14-12-11 means a timestamp of April 23, 2026 at 14:12:11 
+local time. 
+
+That log folder should itself contain an `uplink.log` file (which is generated by the GSE), it
+just needs to be moved to the log folder. This script will **create or overwrite** a file in each 
+log folder called `notes.txt`, which is the same as the `uplink.log` file but human-readable 
+commands instead of hex codes.
+"""
 if __name__ == "__main__":
-    # log_to_note_offset_s = 60*10
+    # FOXSI-5 flight offset:
+    log_to_note_offset_s = 60*5 + 20
     log_to_note_offset_s = 0
+    
     if len(sys.argv) > 1:
         logfolders = ''
         try:
@@ -591,10 +733,12 @@ if __name__ == "__main__":
             notes_files.append(this_notes)
 
         earliest_folder = min(logfolders, key=detect_datetime_folder)
-        folder_str = "" 
-        for file in notes_files:
-            folder_str += file+" "
-        subprocess.call("cat "+ folder_str + " | sort -n > " + os.path.join(earliest_folder, "merged_notes.txt"), shell=True)
+        if os.path.join(earliest_folder, "merged_notes.txt") not in [os.path.join(earliest_folder, f) for f in os.listdir(earliest_folder)]:
+            print("making new note merge")
+            folder_str = "" 
+            for file in notes_files:
+                folder_str += file+" "
+            subprocess.call("cat "+ folder_str + " | sort -n > " + os.path.join(earliest_folder, "merged_notes.txt"), shell=True)
         
         # topfoldername = os.path.basename(os.path.join(sys.argv[1], '..'))
         figname = "stripchart-"+detect_datetime_folder(earliest_folder).strftime("%-d%b%Y").lower()+"-merged.pdf"
@@ -605,7 +749,7 @@ if __name__ == "__main__":
             logfolder=logfolders, 
             notes=os.path.join(earliest_folder, "merged_notes.txt"), 
             figpath=figname, 
-            annotateallplots=False)
+            annotateallplots=True)
         
         sys.exit()
         

@@ -41,7 +41,7 @@ flag_values = {
 
 ranges = {
     1: (-30,60),
-    2: (21, 24)
+    2: (17, 35)
 }
 
 class Parser:
@@ -114,9 +114,16 @@ class Parser:
 
                 # each frame will have an associated `unixtime` and `data`
                 # (`data` stores the error and raw data from the measurement)
+                
+                this_unixtime = data[global_index+2:global_index+6]
+                
+                if this_unixtime in [p['unixtime'] for p in output[data[global_index]]]:
+                    print(f"found duplicate unixtime {this_unixtime.hex()} for block {block} for chip {data[global_index]}")
+                    # continue
+                
                 inner_structure = {
-                    'unixtime': data[global_index+2:global_index+6],
-                    'data': {}
+                    'unixtime': this_unixtime,
+                    'data': {},
                 }
                 # actual data (not `unixtime`) starts 6 bytes into the frame
                 local_offset = 6
@@ -289,7 +296,7 @@ class Plotter:
                 if not aggregate_plot:
                     fig, ax = plt.subplots(figsize=(12,6))
 
-                    ax.plot(times, temps)
+                    ax.plot(times, temps, label=labels[chip][j])
                     ax.set(
                         xlabel="Time",
                         ylabel="Temperature (ºC)",
@@ -300,7 +307,8 @@ class Plotter:
                     plt.ylabel("Temperature (ºC)")
                     plt.xticks(rotation=45)
                     plt.grid(which='major', axis='y')
-                    plt.legend(labels[chip].values())
+                    # plt.legend(labels[chip].values())
+                    plt.legend()
 
                     if diff_plot:
                         figh, axh = plt.subplots()
@@ -308,7 +316,8 @@ class Plotter:
                         plt.title(title_text + ", chip " + str(chip), fontsize=10)
                         plt.xlabel(r"$T[i] - T[i - 1] \ \text{(ºC)}$")
                         plt.ylabel("Counts")
-                        plt.legend(labels[chip].values())
+                        # plt.legend(labels[chip].values())
+                        plt.legend()
                     
                     if save_plot:
                         plt.savefig(os.path.join(os.path.dirname(os.path.abspath(self.root_folder)), 'rtd_cs'+str(chip)+'.pdf'))
@@ -317,7 +326,7 @@ class Plotter:
             for chip in self.data[0].rtd_data:
                 fig, (eax, ax) = plt.subplots(2,1,figsize=(12,6), sharex=1, height_ratios=[1,3])
                 ax_label_font_size = 'medium'
-                ax.plot(total_time[chip-1], total_temp[chip-1])
+                [ax.plot(total_time[chip-1], total_temp[chip-1], label=labels[chip][k]) for k in labels[chip].keys()]
                 ax.set(
                     xlabel="Time",
                     ylabel="Temperature (ºC)",
@@ -334,7 +343,7 @@ class Plotter:
                 # startx=0
                 ax.set_xlim(total_time[chip-1][startx], total_time[chip-1][len(total_time[chip-1]) - 1])
                 ax.xaxis.set_major_formatter(mpl.dates.DateFormatter('%H:%M:%S'))
-                plt.legend(labels[chip].values(), loc='lower left', fontsize='x-small')
+                plt.legend(labels[chip].values(), loc='upper left', fontsize='x-small')
 
                 # error rate plots
                 rect_flag = np.nan_to_num(total_flag[chip-1])
