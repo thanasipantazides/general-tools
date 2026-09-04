@@ -232,10 +232,19 @@ class Log:
                 abstime = start_datetime + datetime.timedelta(seconds=reltime)
                 d[abstime] = {k:frame[0][k] for k in frame[0].keys() if k != 'unixtime'}
                 self.data[abstime] = d[abstime]
+                
+        elif fname == "bus_power.csv":
+            data = np.genfromtxt(log, delimiter=',')
+            #maybe look for a T0.txt file in the same folder? holding UTC of T0?
+            # And turn that value into a datetime object to adjust all the time values
+            # in the bus_power.csv file?
+            # Then read and adjust the bus_power.csv and put the results in a dict?
 
         else:
             raise NotImplementedError
-        
+    
+
+    
 class StripChart:
     def __init__(self, 
                  logfolder: str|list[str]|None, 
@@ -254,6 +263,8 @@ class StripChart:
         self.maxnotelength = maxnotelength
         self.figpath = figpath
         self.annotateallplots = annotateallplots
+
+        self.pow_csv = ''
 
         self.deck = None
         if config is not None:
@@ -440,16 +451,18 @@ class StripChart:
         self.curr_sensors = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
         self.volt_data = np.zeros((len(self.pow_times), len(self.volt_sensors)), dtype=np.float32)
         self.curr_data = np.zeros((len(self.pow_times), len(self.curr_sensors)), dtype=np.float32)
-        self.cmos_curr_data = "time (PDT), CMOS1 current (A), CMOS3 current (A)"
+        # self.cmos_curr_data = "time (AKDT), 28 V bus voltage (V), 5.5 V bus voltage (V), 12 V bus voltage (V), 5 V bus voltage (V), Timepix 12 V current (A), Timepix 5 V current (A), CMOS1 current (A), CMOS3 current (A)"
+        self.add_to_csv(header=True)
         for k,key in enumerate(self.pow_times):
             for s,sensor in zip(range(len(self.volt_sensors)), self.volt_sensors):
                 self.volt_data[k,s] = self.powlog.data[key][sensor]
         for k,key in enumerate(self.pow_times):
-            self.cmos_curr_data += '\n' + key.strftime('%b %d %Y %H:%M:%S.%f')
+            # self.cmos_curr_data += '\n' + key.strftime('%b %d %Y %H:%M:%S.%f') + ', ' + str(self.powlog.data[key][0]) + ', ' + str(self.powlog.data[key][1]) + ', ' + str(self.powlog.data[key][2]) + ', ' + str(self.powlog.data[key][3])
+            self.add_to_csv(timekey=key)
             for s,sensor in zip(range(len(self.curr_sensors)), self.curr_sensors):
                 self.curr_data[k,s] = self.powlog.data[key][sensor]
-                if 'CMOS' in pow_labels[sensor]:
-                    self.cmos_curr_data += ', ' + str(self.curr_data[k,s])
+                # if 'CMOS' in pow_labels[sensor] or 'Timepix' in pow_labels[sensor]:
+                    # self.cmos_curr_data += ', ' + str(self.curr_data[k,s])
 
         if self.smooth_current_n > 0:
             for s in range(len(self.curr_sensors)):
@@ -577,7 +590,8 @@ class StripChart:
                 
                 
         self.ax['cold_data'].set_ylim([min(self.rtd_times), max(self.rtd_times)])
-        
+        # self.ax['cold_data'].set_ylim([min(self.rtd_times) + datetime.timedelta(minutes=10), max(self.rtd_times)])
+
         startdate = min(self.rtd_times[0], self.pow_times[0])
         self.fig.suptitle(startdate.strftime('%b %d, %Y'), y=0.05)
         
@@ -684,6 +698,23 @@ class StripChart:
 
         plt.show()
 
+    def add_to_csv(self, timekey=None, header=False):
+        if header:
+            self.pow_csv += 'Time AKDT, '
+            for k in sorted(pow_labels.keys()):
+                self.pow_csv += pow_labels[k] + ', '
+            self.pow_csv += '\n'
+        if timekey:
+            self.pow_csv += timekey.strftime('%b %d %Y %H:%M:%S.%f') + ', '
+            for s in range(len(pow_labels.keys())):
+                sample = self.powlog.data[timekey][s]
+                self.pow_csv += f'{sample:e}'
+                if s < len((pow_labels.keys())) - 1:
+                    self.pow_csv += ', '
+    
+            self.pow_csv += '\n'
+        
+
     def push(self, dataframe=bytes(), noteline=""):
         pass
 
@@ -707,8 +738,8 @@ commands instead of hex codes.
 """
 if __name__ == "__main__":
     # FOXSI-5 flight offset:
-    log_to_note_offset_s = 60*5 + 20
-    log_to_note_offset_s = 0
+    log_to_note_offset_s = 3600*0 + 60*5 + 20
+    # log_to_note_offset_s = 0
     
     if len(sys.argv) > 1:
         logfolders = ''
@@ -750,7 +781,8 @@ if __name__ == "__main__":
             notes=os.path.join(earliest_folder, "merged_notes.txt"), 
             figpath=figname, 
             annotateallplots=True)
-        
+        with open("/Users/thanasi/Documents/FOXSI/Data/flight_data/may14-launch/processed/telemetry/all-power.csv", 'w') as f:
+            f.write(s.pow_csv)
         sys.exit()
         
     if len(sys.argv) == 3:
