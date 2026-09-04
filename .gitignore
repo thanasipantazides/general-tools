@@ -22,3 +22,5 @@ __pycache__/
 .cache/
 
 **/Manifest.toml
+
+general-tools-py/s3/
