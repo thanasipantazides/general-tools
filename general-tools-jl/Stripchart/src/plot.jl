@@ -1,5 +1,6 @@
 using Dates
 using GLMakie
+using Base.Iterators: partition
 
 function julia_main()::Cint
     if length(ARGS) == 1
@@ -432,4 +433,383 @@ function stripchart_file(power_file::AbstractString, rtd_file::AbstractString)
     #         end
     #     end
     end
+end
+
+function stripchart_log(power_log::AbstractString, rtd_log::AbstractString, start_time::Dates.DateTime)
+    bufflen = 2000
+    
+    GLMakie.activate!(title="FOXSI housekeeping")
+    fig = GLMakie.Figure(size=(1200,800))
+    grid = GLMakie.GridLayout(fig[1,1])
+    
+    display(fig)
+    
+    # create all axes, buffers.
+    cold_ax =       GLMakie.Axis(grid[1,1], title="Cold focal plane\ntemperatures [ºC]", xlabel="[ºC]")
+    cold_flag_ax =  GLMakie.Axis(grid[1,2], xticks=[0,5,9])
+    warm_ax =       GLMakie.Axis(grid[1,3], title="Warm detector-end\ntemperatures [ºC]", xlabel="[ºC]")
+    warm_flag_ax =  GLMakie.Axis(grid[1,4], xticks=[0,5,9])
+    opt_ax =        GLMakie.Axis(grid[1,5], title="Optics-end\ntemperatures [ºC]", xlabel="[ºC]")
+    opt_flag_ax =   GLMakie.Axis(grid[1,6], xticks=[0,5,9])
+    current_ax =    GLMakie.Axis(grid[1,7], title="Current [A]", xlabel="[A]")
+    voltage_ax =    GLMakie.Axis(grid[1,8], title="Voltage [V]", xlabel="[V]")
+    
+    all_ax = [cold_ax, cold_flag_ax, warm_ax, warm_flag_ax, opt_ax, opt_flag_ax, current_ax, voltage_ax]
+    
+    do_vdiff = GLMakie.Button(grid[3,8], tellwidth=false, label="Differential voltage")
+    do_rescale = GLMakie.Button(grid[3,1], tellwidth=false, label="Autoscale")
+    do_legend = GLMakie.Toggle(grid[3,2], tellwidth=false, active=true, halign=:right)
+    toggle_lab = GLMakie.Label(grid[3,3], "Show legends", tellwidth=false, justification=:left, halign=:left)
+    
+    rowsize!(grid, 2, Relative(0/3))
+    
+    colsize!(grid, 1, Relative(1/6))
+    colsize!(grid, 3, Relative(1/6))
+    colsize!(grid, 5, Relative(1/6))
+    colsize!(grid, 7, Relative(1/6))
+    colsize!(grid, 8, Relative(1/6))
+    colsize!(grid, 2, Relative(1/18))
+    colsize!(grid, 4, Relative(1/18))
+    colsize!(grid, 6, Relative(1/18))
+
+    plot_func = scatter!
+    update_theme!(Scatter = (; markersize = 2))
+    
+    cold_plot = Printer(cold_ax, length=bufflen, width=length(rtd_lookup_cold["indices"]))
+    [plot_func(cold_plot.axis, cold_plot.data[k], cold_plot.times, label=rtd_lookup_cold["labels"][k]) for k in 1:length(rtd_lookup_cold["indices"])]
+    cold_flag_plot = Printer(cold_flag_ax, length=bufflen, width=1)
+    plot_func(cold_flag_plot.axis, cold_flag_plot.data[1], cold_flag_plot.times, color=:black)
+    
+    warm_plot = Printer(warm_ax, length=bufflen, width=length(rtd_lookup_warm["indices"]))
+    [plot_func(warm_plot.axis, warm_plot.data[k], warm_plot.times, label=rtd_lookup_warm["labels"][k]) for k in 1:length(rtd_lookup_warm["indices"])]
+    warm_flag_plot = Printer(warm_flag_ax, length=bufflen, width=1)
+    plot_func(warm_flag_plot.axis, warm_flag_plot.data[1], warm_flag_plot.times, color=:black)
+    
+    opt_plot = Printer(opt_ax, length=bufflen, width=length(rtd_lookup_opt["indices"]))
+    [plot_func(opt_plot.axis, opt_plot.data[k], opt_plot.times, label=rtd_lookup_opt["labels"][k]) for k in 1:length(rtd_lookup_opt["indices"])]
+    opt_flag_plot = Printer(opt_flag_ax, length=bufflen, width=1)
+    plot_func(opt_flag_plot.axis, opt_flag_plot.data[1], opt_flag_plot.times, color=:black)
+    
+    curr_plot = Printer(current_ax, length=bufflen, width=length(pow_lookup_curr["indices"]))
+    [plot_func(curr_plot.axis, curr_plot.data[k], curr_plot.times, label=pow_lookup_curr["labels"][k]) for k in 1:length(pow_lookup_curr["indices"])]
+    volt_plot = Printer(voltage_ax, length=bufflen, width=length(pow_lookup_volt["indices"]))
+    [plot_func(volt_plot.axis, volt_plot.data[k], volt_plot.times, label=pow_lookup_volt["labels"][k]) for k in 1:length(pow_lookup_volt["indices"])]
+    
+    linkyaxes!(all_ax[1], all_ax[2:end]...)
+    [hideydecorations!(all_ax[k]) for k in 2:length(all_ax)]
+    [all_ax[k].ygridvisible = true for k in 1:length(all_ax)]
+    [all_ax[k].xgridvisible = true for k in 1:length(all_ax)]
+    
+    [xlims!(all_ax[k], 0, 9) for k in [2, 4, 6]]
+    
+    # see if these do indeed update after adding plot data
+    framevisible = true
+    cold_leg = axislegend(cold_ax,    halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    warm_leg = axislegend(warm_ax,    halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    opt_leg = axislegend(opt_ax,      halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    curr_leg = axislegend(current_ax, halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    volt_leg = axislegend(voltage_ax, halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    
+    all_legs = [cold_leg, warm_leg, opt_leg, curr_leg, volt_leg]
+    
+    GLMakie.on(do_rescale.clicks) do click_count
+        for k in 1:length(all_ax)
+            GLMakie.autolimits!(all_ax[k])
+        end
+    end
+    
+    GLMakie.on(do_legend.active) do active
+        if active
+            for leg in all_legs
+                leg.labelsize = 10.0
+                leg.patchsize = (20,20)
+                leg.framevisible = true
+            end
+        else
+            for leg in all_legs
+                leg.labelsize = 0
+                leg.patchsize = (0,0)
+                leg.framevisible = false
+            end
+        end
+    end
+    
+    # process RTD data
+    rtd_d = read(rtd_log)
+    rtd1_start = nothing
+    rtd2_start = nothing
+    start1 = true 
+    start2 = true 
+    time_abs = nothing
+    for frame in partition(rtd_d, frame_size_rtd)
+        # put header on it: [0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
+        rtd_header = UInt8[0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
+        rtd_data = [rtd_header; frame]
+        # do the same parsing/plotting.
+        ret = parse_tlm(rtd_data; verbose=false, timestyle=:remote)
+        if isnothing(ret)
+            continue
+        end
+        time, flags, temps, chip = ret
+        if chip == 1
+            if start1
+                start1 = false
+                rtd1_start = time
+            end
+            time_abs = start_time + (time - rtd1_start)
+            # time_abs = time
+            
+        elseif chip == 2
+            if start2
+                start2 = false
+                rtd2_start = time
+            end
+            time_abs = start_time + (time - rtd2_start)
+            # time_abs = time
+        end
+        
+        if chip == rtd_lookup_cold["chip"]
+            push!(cold_plot, time_abs, temps[rtd_lookup_cold["indices"]])
+        end
+        if chip == rtd_lookup_warm["chip"]
+            push!(warm_plot, time_abs, temps[rtd_lookup_warm["indices"]])
+            
+            cold_flag = sum(flags[rtd_lookup_cold["indices"]] .!= 1)
+            warm_flag = sum(flags[rtd_lookup_warm["indices"]] .!= 1)
+            push!(cold_flag_plot, time_abs, [cold_flag])
+            push!(warm_flag_plot, time_abs, [warm_flag])
+            
+        elseif chip == rtd_lookup_opt["chip"]
+            push!(opt_plot, time_abs, temps[rtd_lookup_opt["indices"]])
+            opt_flag = sum(flags[rtd_lookup_opt["indices"]] .!= 1)
+            push!(opt_flag_plot, time_abs, [opt_flag])
+        end
+
+    end
+    
+    pow_d = read(power_log)
+    pow_start = nothing
+    start = true 
+    time_abs = nothing
+    for frame in partition(pow_d, frame_size_pow)
+        # put header on it: [0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
+        pow_header = UInt8[0x02, 0, 1, 0, 1, 0x11, 0x00, 0x00]
+        pow_data = [pow_header; frame]
+        # do the same parsing/plotting.
+        ret = parse_tlm(pow_data; verbose=false, timestyle=:remote)
+        if isnothing(ret)
+            continue
+        end
+        time, values = ret
+        if start
+            start = false
+            pow_start = time
+        end
+        time_abs = start_time + (time - pow_start)
+        # time_abs = time
+        push!(curr_plot, time_abs, values[pow_lookup_curr["indices"]])
+        push!(volt_plot, time_abs, values[pow_lookup_volt["indices"]])
+    end 
+end
+
+function stripchart_log_frame_debug(power_log::AbstractString, rtd_log::AbstractString, start_time::Dates.DateTime)
+    bufflen = 2000
+    
+    GLMakie.activate!(title="FOXSI housekeeping DEBUG")
+    fig = GLMakie.Figure(size=(1200,800))
+    grid = GLMakie.GridLayout(fig[1,1])
+    
+    display(fig)
+    
+    # create all axes, buffers.
+    cold_ax =       GLMakie.Axis(grid[1,1], title="Cold focal plane\ntemperatures [ºC]", xlabel="[ºC]")
+    cold_idx_ax =   GLMakie.Axis(grid[1,2], xlabel="k")
+    cold_flag_ax =  GLMakie.Axis(grid[1,3], xticks=[0,5,9])
+    warm_ax =       GLMakie.Axis(grid[1,4], title="Warm detector-end\ntemperatures [ºC]", xlabel="[ºC]")
+    warm_idx_ax =   GLMakie.Axis(grid[1,5], xlabel="k")
+    warm_flag_ax =  GLMakie.Axis(grid[1,6], xticks=[0,5,9])
+    opt_ax =        GLMakie.Axis(grid[1,7], title="Optics-end\ntemperatures [ºC]", xlabel="[ºC]")
+    opt_idx_ax =    GLMakie.Axis(grid[1,8], xlabel="k")
+    opt_flag_ax =   GLMakie.Axis(grid[1,9], xticks=[0,5,9])
+    current_ax =    GLMakie.Axis(grid[1,10], title="Current [A]", xlabel="[A]")
+    voltage_ax =    GLMakie.Axis(grid[1,11], title="Voltage [V]", xlabel="[V]")
+    
+    all_ax = [
+        cold_ax, 
+        cold_idx_ax, 
+        cold_flag_ax, 
+        warm_ax, 
+        warm_idx_ax, 
+        warm_flag_ax, 
+        opt_ax, 
+        opt_idx_ax, 
+        opt_flag_ax, 
+        current_ax, 
+        voltage_ax
+    ]
+    
+    do_vdiff = GLMakie.Button(grid[3,8], tellwidth=false, label="Differential voltage")
+    do_rescale = GLMakie.Button(grid[3,1], tellwidth=false, label="Autoscale")
+    do_legend = GLMakie.Toggle(grid[3,2], tellwidth=false, active=true, halign=:right)
+    toggle_lab = GLMakie.Label(grid[3,3], "Show legends", tellwidth=false, justification=:left, halign=:left)
+    
+    rowsize!(grid, 2, Relative(0/3))
+    
+    # colsize!(grid, 1, Relative(1/6))
+    # colsize!(grid, 3, Relative(1/6))
+    # colsize!(grid, 5, Relative(1/6))
+    # colsize!(grid, 7, Relative(1/6))
+    # colsize!(grid, 8, Relative(1/6))
+    # colsize!(grid, 2, Relative(1/18))
+    # colsize!(grid, 4, Relative(1/18))
+    # colsize!(grid, 6, Relative(1/18))
+
+    plot_func = scatter!
+    update_theme!(Scatter = (; markersize = 4))
+    
+    cold_plot = Printer(cold_ax, length=bufflen, width=length(rtd_lookup_cold["indices"]))
+    [plot_func(cold_plot.axis, cold_plot.data[k], cold_plot.times, label=rtd_lookup_cold["labels"][k]) for k in 1:length(rtd_lookup_cold["indices"])]
+    cold_idx_plot = Printer(cold_idx_ax, length=bufflen, width=1)
+    plot_func(cold_idx_plot.axis, cold_idx_plot.data[1], cold_idx_plot.times, color=:black)
+    cold_flag_plot = Printer(cold_flag_ax, length=bufflen, width=1)
+    plot_func(cold_flag_plot.axis, cold_flag_plot.data[1], cold_flag_plot.times, color=:black)
+    
+    warm_plot = Printer(warm_ax, length=bufflen, width=length(rtd_lookup_warm["indices"]))
+    [plot_func(warm_plot.axis, warm_plot.data[k], warm_plot.times, label=rtd_lookup_warm["labels"][k]) for k in 1:length(rtd_lookup_warm["indices"])]
+    warm_idx_plot = Printer(warm_idx_ax, length=bufflen, width=1)
+    plot_func(warm_idx_plot.axis, warm_idx_plot.data[1], warm_idx_plot.times, color=:black)
+    warm_flag_plot = Printer(warm_flag_ax, length=bufflen, width=1)
+    plot_func(warm_flag_plot.axis, warm_flag_plot.data[1], warm_flag_plot.times, color=:black)
+    
+    opt_plot = Printer(opt_ax, length=bufflen, width=length(rtd_lookup_opt["indices"]))
+    [plot_func(opt_plot.axis, opt_plot.data[k], opt_plot.times, label=rtd_lookup_opt["labels"][k]) for k in 1:length(rtd_lookup_opt["indices"])]
+    opt_idx_plot = Printer(opt_idx_ax, length=bufflen, width=1)
+    plot_func(opt_idx_plot.axis, opt_idx_plot.data[1], opt_idx_plot.times, color=:black)
+    opt_flag_plot = Printer(opt_flag_ax, length=bufflen, width=1)
+    plot_func(opt_flag_plot.axis, opt_flag_plot.data[1], opt_flag_plot.times, color=:black)
+    
+    curr_plot = Printer(current_ax, length=bufflen, width=length(pow_lookup_curr["indices"]))
+    [plot_func(curr_plot.axis, curr_plot.data[k], curr_plot.times, label=pow_lookup_curr["labels"][k]) for k in 1:length(pow_lookup_curr["indices"])]
+    volt_plot = Printer(voltage_ax, length=bufflen, width=length(pow_lookup_volt["indices"]))
+    [plot_func(volt_plot.axis, volt_plot.data[k], volt_plot.times, label=pow_lookup_volt["labels"][k]) for k in 1:length(pow_lookup_volt["indices"])]
+    
+    linkyaxes!(all_ax[1], all_ax[2:end]...)
+    [hideydecorations!(all_ax[k]) for k in 2:length(all_ax)]
+    [all_ax[k].ygridvisible = true for k in 1:length(all_ax)]
+    [all_ax[k].xgridvisible = true for k in 1:length(all_ax)]
+    
+    [xlims!(all_ax[k], 0, 9) for k in [3, 5, 9]]
+    
+    # see if these do indeed update after adding plot data
+    framevisible = true
+    cold_leg = axislegend(cold_ax,    halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    warm_leg = axislegend(warm_ax,    halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    opt_leg = axislegend(opt_ax,      halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    curr_leg = axislegend(current_ax, halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    volt_leg = axislegend(voltage_ax, halign=:left, valign=:bottom, labelsize=10.0, framevisible=framevisible)
+    
+    all_legs = [cold_leg, warm_leg, opt_leg, curr_leg, volt_leg]
+    
+    GLMakie.on(do_rescale.clicks) do click_count
+        for k in 1:length(all_ax)
+            GLMakie.autolimits!(all_ax[k])
+        end
+    end
+    
+    GLMakie.on(do_legend.active) do active
+        if active
+            for leg in all_legs
+                leg.labelsize = 10.0
+                leg.patchsize = (20,20)
+                leg.framevisible = true
+            end
+        else
+            for leg in all_legs
+                leg.labelsize = 0
+                leg.patchsize = (0,0)
+                leg.framevisible = false
+            end
+        end
+    end
+    
+    # process RTD data
+    rtd_d = read(rtd_log)
+    rtd1_start = nothing
+    rtd2_start = nothing
+    start1 = true 
+    start2 = true 
+    time_abs = nothing
+    for (k, frame) in enumerate(partition(rtd_d, frame_size_rtd))
+        # put header on it: [0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
+        rtd_header = UInt8[0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
+        rtd_data = [rtd_header; frame]
+        # do the same parsing/plotting.
+        ret = parse_tlm(rtd_data; verbose=false, timestyle=:remote)
+        if isnothing(ret)
+            continue
+        end
+        time, flags, temps, chip = ret
+        if chip == 1
+            if start1
+                start1 = false
+                rtd1_start = time
+            end
+            time_abs = time
+            
+        elseif chip == 2
+            if start2
+                start2 = false
+                rtd2_start = time
+            end
+            time_abs = time
+        end
+        
+        if chip == rtd_lookup_cold["chip"]
+            push!(cold_plot, time_abs, temps[rtd_lookup_cold["indices"]])
+            cold_flag = sum(flags[rtd_lookup_cold["indices"]] .!= 1)
+            push!(cold_flag_plot, time_abs, [cold_flag])
+            
+            cold_idx = k
+            push!(cold_idx_plot, time_abs, [k])
+        end
+        if chip == rtd_lookup_warm["chip"]
+            push!(warm_plot, time_abs, temps[rtd_lookup_warm["indices"]])
+            warm_flag = sum(flags[rtd_lookup_warm["indices"]] .!= 1)
+            push!(warm_flag_plot, time_abs, [warm_flag])
+            
+            warm_idx = k
+            push!(warm_idx_plot, time_abs, [k])
+            
+        elseif chip == rtd_lookup_opt["chip"]
+            push!(opt_plot, time_abs, temps[rtd_lookup_opt["indices"]])
+            opt_flag = sum(flags[rtd_lookup_opt["indices"]] .!= 1)
+            push!(opt_flag_plot, time_abs, [opt_flag])
+            
+            opt_idx = k
+            push!(opt_idx_plot, time_abs, [k])
+        end
+    end
+    
+    pow_d = read(power_log)
+    pow_start = nothing
+    start = true 
+    time_abs = nothing
+    for frame in partition(pow_d, frame_size_pow)
+        # put header on it: [0x02, 0, 1, 0, 1, 0x12, 0x00, 0x00]
+        pow_header = UInt8[0x02, 0, 1, 0, 1, 0x11, 0x00, 0x00]
+        pow_data = [pow_header; frame]
+        # do the same parsing/plotting.
+        ret = parse_tlm(pow_data; verbose=false, timestyle=:remote)
+        if isnothing(ret)
+            continue
+        end
+        time, values = ret
+        if start
+            start = false
+            pow_start = time
+        end
+        time_abs = time
+        push!(curr_plot, time_abs, values[pow_lookup_curr["indices"]])
+        push!(volt_plot, time_abs, values[pow_lookup_volt["indices"]])
+    end 
 end

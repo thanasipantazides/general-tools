@@ -58,7 +58,9 @@ function parse_pow(frame::Vector{UInt8}; timestyle=:local)
     raw_5v_src = reinterpret(UInt16, [pframe[8]; pframe[7]])[1]
     channel_5v = raw_5v_src >> 12
     
-    @assert(channel_5v == 0x03)
+    if channel_5v != 0x03
+        return nothing
+    end
     
     ref_5v = 5.0        # [V] reference input voltage for ADC scale
     current_gain = 0.2  # [V/A] current-to-voltage gain for Hall-effect sensors

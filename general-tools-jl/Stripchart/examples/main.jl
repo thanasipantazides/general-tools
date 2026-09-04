@@ -25,6 +25,18 @@ function run(power_file::AbstractString, rtd_file::AbstractString)
     stripchart_file(power_file, rtd_file)
 end
 
+function run(logfolder::AbstractString, start::Dates.DateTime)
+    power_file = abspath(joinpath(logfolder, "housekeeping_pow.log"))
+    rtd_file = abspath(joinpath(logfolder, "housekeeping_rtd.log"))
+    return stripchart_log(power_file, rtd_file, start)
+end
+
+function run_debug(logfolder::AbstractString, start::Dates.DateTime)
+    power_file = abspath(joinpath(logfolder, "housekeeping_pow.log"))
+    rtd_file = abspath(joinpath(logfolder, "housekeeping_rtd.log"))
+    return stripchart_log_frame_debug(power_file, rtd_file, start)
+end
+
 function run(ip::IPv4, port::Int; group::String="")
     # udp_listen(ip, port; group)
     sock = udp_setup(ip, port; group=group)

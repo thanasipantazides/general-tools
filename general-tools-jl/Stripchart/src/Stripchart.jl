@@ -13,6 +13,6 @@ include("plot.jl")
 # export PacketType
 export julia_main
 export udp_setup, parse_rtd, parse_pow, parse_time, parse_tlm, sys_type
-export stripchart, stripchart_file, Printer, push!
+export stripchart, stripchart_file, stripchart_log, stripchart_log_frame_debug, Printer, push!
 
 end # module Stripchart
